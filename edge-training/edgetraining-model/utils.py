@@ -108,7 +108,7 @@ def get_transform(train):
     transforms_list.append(T.ToTensor())
     if train:
         transforms_list.append(T.RandomHorizontalFlip(0.5))
-    transforms_list.append(T.Normalize(mean, std))
+    # transforms_list.append(T.Normalize(mean, std))
     return T.Compose(transforms_list)
 
 

@@ -5,7 +5,7 @@ from PIL import Image
 from pycocotools.coco import COCO
 #from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 
-from group_by_aspect_ratio import GroupedBatchSampler, create_aspect_ratio_groups
+from group_by_aspect_ratio import GroupedBatchSampler, compute_aspect_ratios, create_aspect_ratio_groups
 from engine import train_one_epoch, evaluate
 from utils import create_pretrained_faster_Rcnn_model, collate_fn, get_transform, CustomCocoDataset
 import config
@@ -22,7 +22,7 @@ def get_dataset(name, image_set, transform, data_path):
     return ds, num_classes
 
 
-if __name__ == '__main__':
+def train_and_save_model():
     dataset, num_classes = get_dataset(config.dataset_detection_type, "train",
                                        get_transform(train=True), config.root_data_dir)
     dataset_test, _ = get_dataset(config.dataset_detection_type, "val",
@@ -41,6 +41,9 @@ if __name__ == '__main__':
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     print(device)
+    if device.type.lower() == "cuda" and torch.cuda.memory_allocated() > 0:
+        print("Currently allocated memory: {:.3f} GB.".format(torch.cuda.memory_cached() / 1000000000))
+        torch.cuda.empty_cache()
 
     data_loader = torch.utils.data.DataLoader(
         dataset, batch_sampler=train_batch_sampler, num_workers=config.num_workers,
@@ -56,28 +59,43 @@ if __name__ == '__main__':
     print(faster_rcnn_model)
 
     params = [p for p in faster_rcnn_model.parameters() if p.requires_grad]
+    print("Parameters to be trained: {}".format(params))
     optimizer = torch.optim.SGD(params,
                                 lr=config.lr,
                                 momentum=config.momentum,
                                 weight_decay=config.weight_decay)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer,
-                                                step_size=7,
-                                                gamma=0.1)
-    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer,
-                                                   step_size=3,
-                                                   gamma=0.1)
-
-    best_acc = 0.0
+    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
+                                                        milestones=config.lr_steps,
+                                                        gamma=config.lr_gamma)
 
     for epoch in range(config.num_epochs):
         # train for one epoch, printing every 10 iterations
-        train_one_epoch(faster_rcnn_model, optimizer, data_loader, device, epoch, print_freq=10)
+        train_one_epoch(faster_rcnn_model, optimizer, data_loader, device, epoch, print_freq=config.print_freq)
         # update the learning rate
         lr_scheduler.step()
         # evaluate on the test dataset
         evaluator = evaluate(faster_rcnn_model, data_loader_test, device=device)
 
+
+def make_inference():
     # For inference
-    faster_rcnn_model.eval()
+    # faster_rcnn_model.eval()
     # predictions = faster_rcnn_model(x)
+    pass
+
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser(
+        description=__doc__)
+
+    parser.add_argument('--mode', default='train', help='train or inference')
+
+    args = parser.parse_args()
+    if args.mode and args.mode == "inference":
+        # inference
+        make_inference()
+    else:
+        train_and_save_model()
+
 
